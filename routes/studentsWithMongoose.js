@@ -1019,11 +1019,13 @@ router.put(
 
 //get students that not paid this month
 router.get("/get_not_pay", async (req, res) => {
-  // try {
   console.log("get students");
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 5;
   const { startDate, endDate, code, name, phone } = req.query;
+
+  const today = new Date(); // ✅ Fix 1: defined today
+
   const matchData = () => {
     if (startDate && endDate) {
       return {
@@ -1036,13 +1038,11 @@ router.get("/get_not_pay", async (req, res) => {
       return {};
     }
   };
+
   const matchStudents = () => {
     if (code) {
-      return {
-        code: Number(code),
-      };
+      return { code: Number(code) };
     }
-
     if (name) {
       return {
         $expr: {
@@ -1065,9 +1065,7 @@ router.get("/get_not_pay", async (req, res) => {
     }
     if (endDate) {
       return {
-        date: {
-          $lte: new Date(endDate),
-        },
+        date: { $lte: new Date(endDate) },
       };
     } else {
       return {};
@@ -1079,83 +1077,39 @@ router.get("/get_not_pay", async (req, res) => {
       const start = new Date(startDate);
       start.setDate(start.getDate() + 1);
       start.setHours(0, 0, 0, 0);
-      
-      // Check if the start date is in current month
-      if ((start.getMonth() + 1) === (today.getMonth() + 1)) {
-        // For current month, just check active_status in Student table
+
+      const isCurrentMonth =
+        start.getMonth() === today.getMonth() &&
+        start.getFullYear() === today.getFullYear(); // ✅ Fix 2: also compare year
+
+      if (isCurrentMonth) {
+        // Current month: only check active_status on the Student document
         return { active_status: "active" };
       } else {
-        // For previous/old months, check both Student table and activeOrInactiveDetails
+        // Past month: active in Student table AND was not deactivated that month
         return {
           $and: [
-            { active_status: "active" }, // Must be active in Student table
+            { active_status: "active" },
             {
               $or: [
-                // Either no activeOrInactiveDetails exist for this month
                 { activeOrInactiveDetails: { $size: 0 } },
-                // Or activeOrInactiveDetails exist but none have in_active status
                 {
                   activeOrInactiveDetails: {
                     $not: {
-                      $elemMatch: {
-                        activeStatus: "in_active"
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          ]
+                      $elemMatch: { activeStatus: "in_active" },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
         };
       }
     } else {
-      return {};
+      // ✅ Fix 3: No startDate → still enforce active_status (was returning {} before)
+      return { active_status: "active" };
     }
   };
-
-  // const skipIndex = (page - 1) * limit;
-
-  // const match = {
-  //   $match: {
-  //     payments: {
-  //       $not: {
-  //         $elemMatch: matchData()
-  //       }
-  //     }
-  //   }
-  // };
-
-  // const paginate = {
-  //   $skip: skipIndex,
-  //   $limit: limit
-  // };
-
-  // const lookup = {
-  //   $lookup: {
-  //     from: "payment",
-  //     localField: "_id",
-  //     foreignField: "student",
-  //     as: "payments"
-  //   }
-  // };
-
-  // const pipeline = [lookup, match, paginate];
-
-  // const notPaidStudents = await Student.aggregate(pipeline).exec();
-  // console.log("error");
-  // console.log(notPaidStudents);
-  // // const totalStudents = await Student.countDocuments();
-
-  // res.status(200).json({
-  //   data: notPaidStudents,
-  //   // total: totalStudents,
-  //   page: page,
-  //   limit: limit
-  // });
-  // } catch (error) {
-  //   console.log(error);
-  //   res.status(500).json({ message: 'Server error' });
-  // }
 
   await Student.aggregate([
     {
@@ -1168,7 +1122,7 @@ router.get("/get_not_pay", async (req, res) => {
     },
     {
       $lookup: {
-        from: ActiveOrInactive.collection.name, // Name of the other collection
+        from: ActiveOrInactive.collection.name,
         let: { studentId: "$_id" },
         pipeline: [
           {
@@ -1188,21 +1142,14 @@ router.get("/get_not_pay", async (req, res) => {
           },
           { $project: { student: 1, activatedDate: 1, activeStatus: 1 } },
         ],
-        as: "activeOrInactiveDetails", // Output array field
+        as: "activeOrInactiveDetails",
       },
     },
     {
       $match: {
-        ...matchActiveOrInactive()
+        ...matchActiveOrInactive(), // ✅ always filters active students
       },
     },
-    //   {
-    //     $match: {
-    //         $expr: {
-    //             $eq: [{ $size: "$payments" }, 0] // Ensures no payments are found
-    //         }
-    //     }
-    // },
     {
       $match: {
         payments: {
@@ -1212,60 +1159,20 @@ router.get("/get_not_pay", async (req, res) => {
         },
       },
     },
-    // {
-    //   $match: {
-    //     "payments.date": {
-    //         $gte: new Date(startDate),
-    //         $lt: new Date(endDate)
-    //     }
-    // }
-    // },
-    // {
-    //   $match: {
-    //     payments: { $size: 0 }, // Filter students without payments in the date range
-    //   },
-    // },
-    // {
-    //   $project: {
-    //     code: 1,
-    //     name: 1,
-    //     phone_1: 1,
-    //     phone_2: 1,
-    //     phone_3: 1,
-    //     study_year: 1,
-    //     date: 1,
-    //     is_Azhar: 1,
-    //     has_relative: 1,
-    //     relative: 1,
-    //     is_payment: 1,
-    //     age: 1,
-    //     landline: 1,
-    //     address: 1,
-    //     notes: 1,
-    //     image: 1,
-    //     amount: 1,
-    //     active_status: 1,
-    //   },
-    // },
     {
       $match: {
         ...matchStudents(),
-        // active_status: "active",
         is_payment: "لا",
+        // ✅ active_status removed here — handled by matchActiveOrInactive()
       },
     },
     {
-      $sort: {
-        // name: 1,
-        code: 1,
-      },
+      $sort: { code: 1 },
     },
     {
       $facet: {
         metaData: [
-          {
-            $count: "total",
-          },
+          { $count: "total" },
           {
             $addFields: {
               pageNumber: Number(page),
@@ -1275,12 +1182,8 @@ router.get("/get_not_pay", async (req, res) => {
         ],
         totalAmount: [{ $group: { _id: null, total: { $sum: "$amount" } } }],
         data: [
-          {
-            $skip: Number((page - 1) * limit),
-          },
-          {
-            $limit: Number(limit),
-          },
+          { $skip: Number((page - 1) * limit) },
+          { $limit: Number(limit) },
         ],
       },
     },
@@ -1288,13 +1191,6 @@ router.get("/get_not_pay", async (req, res) => {
     .exec()
     .then((data) => {
       console.log(data);
-      // let result = data[0];
-      // result.metaData = {
-      //   ...data[0].metaData[0],
-      //   count: data[0]?.data?.length,
-      //   // totalAmount: totalAmounts[0]?.totalAmount,
-      //   // studentDetails: studentDetails[0],
-      // };
       res.status(200).send(data[0]);
     })
     .catch((e) => {
@@ -2004,289 +1900,208 @@ router.post(
   bodyParser.json({ extended: true }),
   async (req, res) => {
     try {
-      const { student, activeStatus , activatedDate } = req.body;
-      // console.log(student);
-      let month = new Date(activatedDate).getMonth() + 1;
-      const stDate = new Date(startDate);
-      console.log(stDate);
-      
-      stDate.setMonth(month - 1,0)
-      const enDate = new Date(endDate);
-      enDate.setMonth(month,1);
-      let st = stDate.toLocaleDateString("en-CA");
-      let en = enDate.toLocaleDateString("en-CA");
-      console.log(st);
-      console.log(en);
-      
-      const activeOrInactiveStudent = await ActiveOrInactive.findOne({
+      const { student, activeStatus, activatedDate } = req.body;
+
+      // ✅ Fix 1: Validate required fields
+      if (!student || !activeStatus || !activatedDate) {
+        return res.status(400).json({ message: "student, activeStatus, and activatedDate are required" });
+      }
+
+      // ✅ Fix 2: Compute date range fresh per request, not at module load time
+      const activated = new Date(activatedDate);
+      const activatedMonth = activated.getMonth();   // 0-based
+      const activatedYear = activated.getFullYear();
+
+      // Start = first day of the activated month at 00:00:00
+      const stDate = new Date(activatedYear, activatedMonth, 1);
+      // End = first day of NEXT month (used with $lt, so excludes end itself)
+      const enDate = new Date(activatedYear, activatedMonth + 1, 1);
+
+      console.log("Range:", stDate.toLocaleDateString("en-CA"), enDate.toLocaleDateString("en-CA"));
+
+      // ✅ Fix 3: Check if the activated month is the current month
+      const now = new Date();
+      const isCurrentMonth =
+        activatedMonth === now.getMonth() &&
+        activatedYear === now.getFullYear();
+
+      // ✅ Fix 4: Find existing record for that student in that month
+      const existingRecord = await ActiveOrInactive.findOne({
         $and: [
           { student: new objectId(student) },
           {
             activatedDate: {
-              $gte: new Date(st),
-              $lt: new Date(en),
+              $gte: stDate,
+              $lt: enDate,
             },
           },
-        ],  
+        ],
       });
-      console.log("activeOrInactiveStudent =======>", activeOrInactiveStudent);
-      if (activeOrInactiveStudent) {
-        if ((new Date(activatedDate).getMonth() + 1) == (new Date().getMonth() + 1)) {       
-          await Student.findByIdAndUpdate(new objectId(student), {
-            active_status: activeStatus,
-          });
-        }
-        await ActiveOrInactive.findByIdAndUpdate(
-          new objectId(activeOrInactiveStudent._id),
-          { ...req.body },
-          {
-            new: true,
-          }
-        ).then((value) => {
-          res
-            .status(200)
-            .json({ message: " successfully updated", data: value });
-        });
-      } else {
-        if ((new Date(activatedDate).getMonth()+1) == (new Date().getMonth() + 1)) {       
-          await Student.findByIdAndUpdate(new objectId(student), {
-            active_status: activeStatus,
-          });
-        }
-        await ActiveOrInactive.create({ ...req.body }).then((value) => {
-          res
-            .status(200)
-            .json({ message: " successfully updated", data: value });
+
+      console.log("existingRecord =======>", existingRecord);
+
+      // ✅ Fix 5: Update Student active_status only if it's the current month (deduplicated)
+      if (isCurrentMonth) {
+        await Student.findByIdAndUpdate(new objectId(student), {
+          active_status: activeStatus,
         });
       }
+
+      // ✅ Fix 6: Update or create ActiveOrInactive record (no .then() mixing)
+      let value;
+      if (existingRecord) {
+        value = await ActiveOrInactive.findByIdAndUpdate(
+          new objectId(existingRecord._id),
+          { ...req.body },
+          { new: true }
+        );
+      } else {
+        value = await ActiveOrInactive.create({ ...req.body });
+      }
+
+      return res.status(200).json({ message: "Successfully updated", data: value });
+
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
   }
 );
 
-router.get("/get-active-or-inactive", async (req, res) => {
+// Deactivated students only — optional month/date range (startDate + endDate)
+router.get("/get-inactive-students", async (req, res) => {
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 5;
   const { startDate, endDate, code, name, phone } = req.query;
 
-  const matchData = () => {
-    if (code) {
-      return {
-        code: Number(code),
-      };
+  const escapeRegex = (value) =>
+    String(value).replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+
+  const hasDateRange = Boolean(startDate && endDate);
+  const parsedStartDate = hasDateRange ? new Date(startDate) : null;
+  const parsedEndDate = hasDateRange ? new Date(endDate) : null;
+
+  if (
+    hasDateRange &&
+    (Number.isNaN(parsedStartDate.getTime()) ||
+      Number.isNaN(parsedEndDate.getTime()))
+  ) {
+    return res.status(400).json({ message: "Invalid startDate or endDate" });
+  }
+
+  // ✅ Code + name + phone filters (AND combined)
+  const buildSearchMatch = () => {
+    const conditions = [];
+
+    if (code !== undefined && String(code).trim() !== "") {
+      const parsedCode = Number(code);
+      if (!Number.isNaN(parsedCode)) conditions.push({ code: parsedCode });
     }
 
     if (name) {
-      return {
-        $expr: {
-          $regexMatch: {
-            input: "$name",
-            regex: name,
-            options: "i",
+      conditions.push({ name: { $regex: escapeRegex(name), $options: "i" } });
+    }
+
+    if (phone) {
+      conditions.push({
+        $or: [
+          { phone_1: { $regex: escapeRegex(phone), $options: "i" } },
+          { phone_2: { $regex: escapeRegex(phone), $options: "i" } },
+          { phone_3: { $regex: escapeRegex(phone), $options: "i" } },
+        ],
+      });
+    }
+
+    if (conditions.length === 0) return {};
+    if (conditions.length === 1) return conditions[0];
+    return { $and: conditions };
+  };
+
+  // ✅ Fix 1: Proper separation between no-range, current month, and past month
+  const buildDeactivatedMatch = () => {
+    if (!hasDateRange) {
+      // No date filter → just check the Student's current active_status
+      return { active_status: "in_active" };
+    }
+
+    const now = new Date();
+    const isCurrentMonth =
+      parsedStartDate.getMonth() === now.getMonth() &&
+      parsedStartDate.getFullYear() === now.getFullYear();
+
+    if (isCurrentMonth) {
+      // Current month → rely on Student's live active_status field
+      return { active_status: "in_active" };
+    }
+
+    // Past month → rely on the ActiveOrInactive history record
+    return {
+      activeOrInactiveDetails: {
+        $elemMatch: { activeStatus: "in_active" },
+      },
+    };
+  };
+
+  // ✅ Fix 2: Only include $lookup when a date range is given (past month needs it)
+  const needsLookup = hasDateRange && (() => {
+    const now = new Date();
+    return !(
+      parsedStartDate.getMonth() === now.getMonth() &&
+      parsedStartDate.getFullYear() === now.getFullYear()
+    );
+  })();
+
+  const lookupStage = needsLookup
+    ? [
+        {
+          $lookup: {
+            from: ActiveOrInactive.collection.name,
+            let: { studentId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $and: [
+                    { $expr: { $eq: ["$student", "$$studentId"] } },
+                    { activeStatus: "in_active" },
+                    // ✅ Fix 3: both $gte and $lt restored for correct range
+                    {
+                      activatedDate: {
+                        // $gt: parsedStartDate,
+                        $lt: parsedEndDate,
+                      },
+                    },
+                  ],
+                },
+              },
+              {
+                $project: {
+                  student: 1,
+                  activatedDate: 1,
+                  activeStatus: 1,
+                },
+              },
+            ],
+            as: "activeOrInactiveDetails",
           },
         },
-      };
-    }
-    if (phone) {
-      return {
-        $or: [
-          { phone_1: { $regex: phone, $options: "i" } },
-          { phone_2: { $regex: phone, $options: "i" } },
-          { phone_3: { $regex: phone, $options: "i" } },
-        ],
-      };
-    }
-    // if (startDate && endDate) {
-    //   return {
-    //     $or: [
-    //       { activeStatus: "in_active" },
-    //       { "studentDetails.active_status": "in_active" },
-    //     ],
-    //   };
-    // } 
-    else {
-      return {};
-    }
-  };
+      ]
+    : [];
 
-  const matchActiveOrInactive = () => {
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setDate(start.getDate() + 1);
-      start.setHours(0, 0, 0, 0);
-      
-      // Check if the start date is in current month
-      if ((start.getMonth() + 1) === (today.getMonth() + 1)) {
-        // For current month, just check active_status in Student table
-        return { active_status: "active" };
-      } else {
-        // For previous/old months, check both Student table and activeOrInactiveDetails
-        return {
-          $and: [
-            { active_status: "active" }, // Must be active in Student table
-            {
-              $or: [
-                // Either no activeOrInactiveDetails exist for this month
-                { activeOrInactiveDetails: { $size: 0 } },
-                // Or activeOrInactiveDetails exist but none have in_active status
-                {
-                  activeOrInactiveDetails: {
-                    $not: {
-                      $elemMatch: {
-                        activeStatus: "in_active"
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          ]
-        };
-      }
-    } else {
-      return {};
-    }
-  };
-
-  // await ActiveOrInactive.aggregate([
-  //   {
-  //     $lookup: {
-  //       from: "students", // Name of the other collection
-  //       localField: "student", // Field from the attendance documents
-  //       foreignField: "_id", // Field from the students documents
-  //       as: "studentDetails", // Output array field
-  //     },
-  //   },
-  //   {
-  //     $unwind: {
-  //       path: "$studentDetails", // Unwind the studentDetails array
-  //       preserveNullAndEmptyArrays: false, // Optional: Exclude documents without a match
-  //     },
-  //   },
-  //   {
-  //     $addFields: {
-  //       studentDetails: "$studentDetails", // Move studentDetails back to top level
-  //     },
-  //   },
-  //   {
-  //     $match: {
-  //       ...matchData(),
-  //     },
-  //   },
-  //   {
-  //     $sort: {
-  //       // "studentDetails.name": 1,
-  //       updatedAt: 1,
-  //       createdAt: -1,
-  //       // "studentDetails.code": 1,
-  //     },
-  //   },
-  //   {
-  //     $facet: {
-  //       metaData: [
-  //         {
-  //           $count: "total",
-  //         },
-  //         {
-  //           $addFields: {
-  //             pageNumber: Number(page),
-  //             totalPages: { $ceil: { $divide: ["$total", limit] } },
-  //           },
-  //         },
-  //       ],
-  //       totalAmount: [
-  //         { $group: { _id: null, total: { $sum: "$studentDetails.amount" } } },
-  //       ],
-  //       data: [
-  //         {
-  //           $skip: Number((page - 1) * limit),
-  //         },
-  //         {
-  //           $limit: Number(limit),
-  //         },
-  //       ],
-  //     },
-  //   },
-  // ])
   await Student.aggregate([
-    {
-      $lookup: {
-        from: ActiveOrInactive.collection.name, // Name of the other collection
-        let: { studentId: "$_id" },
-        pipeline: [
-          {
-            $lookup: {
-              from: "students", // Name of the other collection
-              localField: "student", // Field from the attendance documents
-              foreignField: "_id", // Field from the students documents
-              as: "studentDetails", // Output array field
-            },
-          },
-          {
-            $unwind: {
-              path: "$studentDetails", // Unwind the studentDetails array
-              preserveNullAndEmptyArrays: false, // Optional: Exclude documents without a match
-            },
-          },
-          {
-            $addFields: {
-              studentDetails: "$studentDetails", // Move studentDetails back to top level
-            },
-          },
-          {
-            $match: {
-              $and: [
-                {
-                  $expr: { $eq: ["$student", "$$studentId"] },
-                },
-                {
-                  activatedDate: {
-                    $gte: new Date(startDate),
-                    $lte: new Date(endDate),
-                  },
-                },
-              ],
-            },
-          },
-          {
-            $project: {
-              student: 1,
-              activatedDate: 1,
-              activeStatus: 1,
-              studentDetails: 1,
-            },
-          },
-        ],
-        as: "activeOrInactiveDetails", // Output array field
-      },
-    },
+    ...lookupStage,
     {
       $match: {
-     
-        // active_status: "active",
+        active_status:"in_active",
+        ...buildSearchMatch(),
+        ...buildDeactivatedMatch(),
       },
     },
     {
-      $match: {
-        ...matchData(),
-        // active_status: "in_active",
-        ...matchActiveOrInactive(),
-      },
-    },
-    {
-      $sort: {
-        // name: 1,
-        updatedAt: -1,
-        // code: 1,
-      },
+      $sort: { updatedAt: -1 },
     },
     {
       $facet: {
         metaData: [
-          {
-            $count: "total",
-          },
+          { $count: "total" },
           {
             $addFields: {
               pageNumber: Number(page),
@@ -2294,26 +2109,27 @@ router.get("/get-active-or-inactive", async (req, res) => {
             },
           },
         ],
-        totalAmount: [{ $group: { _id: null, total: { $sum: "$amount" } } }],
+        totalAmount: [
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ],
         data: [
-          {
-            $skip: Number((page - 1) * limit),
-          },
-          {
-            $limit: Number(limit),
-          },
+          { $skip: Number((page - 1) * limit) },
+          { $limit: Number(limit) },
         ],
       },
     },
-  ]).then((data) => {
-      console.log(data[0].data);
-      let result = data[0];
-      result.metaData = {
-        ...data[0].metaData[0],
-        count: data[0]?.data?.length,
-        // totalAmount: totalAmounts[0]?.totalAmount,
-      };
-      res.status(200).send(result);
+  ])
+    .then((data) => {
+      // ✅ Fix 4: clean response shape without mutating the result object
+      const [result] = data;
+      res.status(200).json({
+        metaData: {
+          ...result.metaData[0],
+          count: result.data?.length ?? 0,
+        },
+        totalAmount: result.totalAmount[0]?.total ?? 0,
+        data: result.data,
+      });
     })
     .catch((e) => {
       res.status(500).json({ message: e.message });

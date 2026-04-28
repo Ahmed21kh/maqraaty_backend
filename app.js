@@ -9,7 +9,8 @@ const studentRoutes = require('./routes/studentsWithMongoose');
 const app = express();
 
 // 1. إعدادات قاعدة البيانات (MongoDB Atlas)
-const url = "mongodb+srv://AhmedKh:mongo@cluster0.xrny0xe.mongodb.net/Maqraaty";
+const url = "mongodb+srv://ah_db_user:Ah20192344@newcluster.iloyqea.mongodb.net/Maqraaty";
+// const url = "mongodb://localhost:27017/Maqraaty";
 
 // 2. Middlewares
 app.use(bodyparser.json());
@@ -36,7 +37,7 @@ app.get("*", (req, res) => {
 });
 
 // 7. إعداد المنفذ والتشغيل (مهم جداً للـ Deployment)
-const PORT = process.env.PORT || 8080; // سيستخدم المنفذ المتاح على السيرفر أو 8080 محلياً
+const PORT = process.env.PORT || 8000; // سيستخدم المنفذ المتاح على السيرفر أو 8080 محلياً
 
 const startServer = async () => {
     try {
